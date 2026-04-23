@@ -1,48 +1,119 @@
 import asyncio
 import json
+import logging
+from datetime import datetime, timezone
+from collections import defaultdict, deque
+from typing import Deque, DefaultDict, Dict, List
+
 import websockets
+
 from app.core.config import settings
 
-# In-memory store
-VESSELS = []
+
+logger = logging.getLogger(__name__)
+
+_VESSELS: Dict[int, Dict[str, object]] = {}
+_VESSEL_TRAILS: DefaultDict[int, Deque[Dict[str, object]]] = defaultdict(lambda: deque(maxlen=12))
+VESSELS: List[Dict[str, object]] = []
 
 
-async def stream_ais():
-    url = "wss://stream.aisstream.io/v0/stream"
+def _in_singapore_strait(lat: float, lon: float) -> bool:
+    return (
+        settings.AIS_MIN_LAT <= lat <= settings.AIS_MAX_LAT
+        and settings.AIS_MIN_LON <= lon <= settings.AIS_MAX_LON
+    )
 
-    try:
-        async with websockets.connect(url) as ws:
-            subscribe_message = {
-                "APIKey": settings.AIS_API_KEY,
-                "BoundingBoxes": [[[1.0, 103.5], [1.5, 104.1]]]  # Singapore Strait
-            }
 
-            await ws.send(json.dumps(subscribe_message))
+def get_vessels_snapshot(limit: int = 80) -> List[Dict[str, object]]:
+    if limit <= 0:
+        return []
 
-            async for message in ws:
-                data = json.loads(message)
+    snapshot: List[Dict[str, object]] = []
+    for vessel in list(_VESSELS.values())[-limit:]:
+        vessel_key = int(vessel.get("mmsi") or 0)
+        trail = list(_VESSEL_TRAILS.get(vessel_key, deque()))
+        snapshot.append({
+            **vessel,
+            "trail": trail,
+        })
 
-                if "Message" in data:
-                    try:
-                        vessel = data["Message"]["PositionReport"]
+    snapshot.sort(key=lambda item: float(item.get("timestamp_epoch") or 0), reverse=True)
+    return snapshot
 
-                        lat = vessel.get("Latitude")
-                        lon = vessel.get("Longitude")
 
-                        # ✅ Filter only valid sea region (clean demo)
-                        if lat and lon:
-                            if 1.0 < lat < 1.5 and 103.6 < lon < 104.1:
-                                VESSELS.append({
-                                    "lat": lat,
-                                    "lon": lon
-                                })
+def _sync_exported_vessels() -> None:
+    VESSELS.clear()
+    VESSELS.extend(get_vessels_snapshot())
 
-                        # ✅ Keep list small (UI clarity + performance)
-                        if len(VESSELS) > 15:
-                            VESSELS.pop(0)
 
-                    except Exception:
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+async def stream_ais() -> None:
+    if not settings.AIS_API_KEY:
+        logger.warning("AIS_API_KEY missing; AIS stream disabled")
+        return
+
+    subscribe_message = {
+        "APIKey": settings.AIS_API_KEY,
+        "BoundingBoxes": [
+            [
+                [settings.AIS_MIN_LAT, settings.AIS_MIN_LON],
+                [settings.AIS_MAX_LAT, settings.AIS_MAX_LON],
+            ]
+        ],
+    }
+
+    while True:
+        try:
+            async with websockets.connect(settings.AIS_STREAM_URL, ping_interval=20, ping_timeout=20) as ws:
+                await ws.send(json.dumps(subscribe_message))
+                logger.info("AIS stream connected")
+
+                async for message in ws:
+                    payload = json.loads(message)
+                    position = payload.get("Message", {}).get("PositionReport")
+                    if not position:
                         continue
 
-    except Exception as e:
-        print("AIS Stream Error:", e)
+                    lat = position.get("Latitude")
+                    lon = position.get("Longitude")
+                    mmsi = position.get("UserID")
+                    sog = position.get("Sog")
+
+                    if lat is None or lon is None:
+                        continue
+
+                    lat_f = float(lat)
+                    lon_f = float(lon)
+
+                    if not _in_singapore_strait(lat_f, lon_f):
+                        continue
+
+                    vessel_key = int(mmsi) if mmsi is not None else 0
+                    timestamp_epoch = asyncio.get_event_loop().time()
+
+                    trail = _VESSEL_TRAILS[vessel_key]
+                    if not trail or trail[-1]["lat"] != lat_f or trail[-1]["lon"] != lon_f:
+                        trail.append({
+                            "lat": lat_f,
+                            "lon": lon_f,
+                            "timestamp_epoch": timestamp_epoch,
+                            "timestamp": _now_iso(),
+                        })
+
+                    _VESSELS[vessel_key] = {
+                        "lat": lat_f,
+                        "lon": lon_f,
+                        "mmsi": vessel_key,
+                        "sog": float(sog) if sog is not None else 0.0,
+                        "timestamp_epoch": timestamp_epoch,
+                        "timestamp": _now_iso(),
+                        "trail": list(trail),
+                    }
+
+                    _sync_exported_vessels()
+        except Exception as exc:
+            logger.exception("AIS stream error; reconnecting: %s", exc)
+            await asyncio.sleep(3)

@@ -1,10 +1,34 @@
-import os
-from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-class Settings:
-    AIS_API_KEY = os.getenv("AIS_API_KEY")
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=str(BASE_DIR / ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    AIS_API_KEY: str = ""
+    WEATHER_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
+
+    OPEN_METEO_BASE_URL: str = "https://api.open-meteo.com/v1"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
+    AIS_STREAM_URL: str = "wss://stream.aisstream.io/v0/stream"
+
+    AIS_MAX_VESSELS: int = 120
+    AIS_MIN_LAT: float = Field(default=1.0)
+    AIS_MAX_LAT: float = Field(default=1.5)
+    AIS_MIN_LON: float = Field(default=103.5)
+    AIS_MAX_LON: float = Field(default=104.1)
+
+    FRONTEND_ORIGIN: str = "http://localhost:5174"
+
 
 settings = Settings()
