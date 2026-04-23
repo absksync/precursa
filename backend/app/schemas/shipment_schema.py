@@ -47,6 +47,14 @@ class ExplainRiskResponse(BaseModel):
     destination: str
     route: str
     dri: int
+    rule_dri: int
+    ml_dri: int
+    xgb_dri: int | None = None
+    lstm_dri: int | None = None
+    trend: str | None = None
+    time_aware_prediction: bool | None = None
+    confidence: float
+    prediction_engine: str
     level: str
     breakdown: RiskBreakdown
     delay_estimate: str
@@ -68,6 +76,14 @@ class ShipmentOut(BaseModel):
     lon: float
     cargo: str
     dri: int
+    rule_dri: int | None = None
+    ml_dri: int | None = None
+    xgb_dri: int | None = None
+    lstm_dri: int | None = None
+    trend: str | None = None
+    time_aware_prediction: bool | None = None
+    confidence: float | None = None
+    prediction_engine: str | None = None
     weather_risk: int
     weather: WeatherSnapshot
     factors: List[Factor]
@@ -75,8 +91,36 @@ class ShipmentOut(BaseModel):
     route_coords: List[List[float]]
 
 
+class ExplainWeatherInput(BaseModel):
+    temperature: float
+    wind_speed: float
+    rain: float
+    visibility: float
+    severity: int
+
+
 class ExplainRequest(BaseModel):
-    shipment: Dict[str, Any]
+    id: str
+    origin: str
+    destination: str
+    route: str
+    dri: int
+    weather: ExplainWeatherInput
+    congestion: int
+    risk_level: str
+    lat: float | None = None
+    lon: float | None = None
+    route_coords: List[List[float]] | None = None
+    cargo: str | None = None
+    factors: List[Factor] | None = None
+    rule_dri: int | None = None
+    ml_dri: int | None = None
+    xgb_dri: int | None = None
+    lstm_dri: int | None = None
+    trend: str | None = None
+    time_aware_prediction: bool | None = None
+    confidence: float | None = None
+    prediction_engine: str | None = None
 
 
 class ApiResponse(BaseModel):
@@ -92,3 +136,35 @@ class DashboardOverview(BaseModel):
     current_weather: WeatherSnapshot
     risk_breakdown: List[Factor]
     top_shipments: List[ShipmentOut]
+
+
+class GlobalRiskArticle(BaseModel):
+    headline: str
+    region: str
+    risk_level: str
+    reasoning: str
+    impact_summary: str
+    published_at: str
+    timestamp: str
+    source: str
+    url: str | None = None
+
+
+class GlobalRiskSummary(BaseModel):
+    total_articles: int
+    high_risk_articles: int
+    medium_risk_articles: int
+    low_risk_articles: int
+    dominant_region: str
+    top_signal: str
+    source: str
+
+
+class GlobalRiskResponse(BaseModel):
+    generated_at: str
+    window: str
+    source: str
+    status: str
+    search_terms: List[str]
+    summary: GlobalRiskSummary
+    events: List[GlobalRiskArticle]

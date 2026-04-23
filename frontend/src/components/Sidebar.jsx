@@ -21,6 +21,7 @@ const menuItems = [
   { key: 'risk-alerts', label: 'Risk Alerts', icon: FiAlertTriangle },
   { key: 'weather', label: 'Weather', icon: FiCloud },
   { key: 'analytics', label: 'Analytics', icon: FiBarChart2 },
+  { key: 'global-risk', label: 'Global Risk', icon: FiAlertTriangle },
   { key: 'reports', label: 'Reports', icon: FiFileText },
   { key: 'settings', label: 'Settings', icon: FiSettings }
 ]
@@ -72,16 +73,6 @@ export default function Sidebar({ activePage, hasError, lastUpdated, isOpen, onN
             <span>{hasError ? 'Partial Degraded' : 'All Systems Operational'}</span>
           </div>
           <p className="mt-2 text-xs text-gray-500">Updated {lastUpdated}</p>
-        </div>
-
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-3 backdrop-blur-lg">
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-full border border-white/10 bg-white/10" />
-            <div>
-              <p className="text-sm text-white">Abhishek Singh</p>
-              <p className="text-xs text-gray-400">Admin</p>
-            </div>
-          </div>
         </div>
       </div>
     </aside>

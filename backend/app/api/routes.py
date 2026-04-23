@@ -6,6 +6,7 @@ from fastapi import APIRouter
 from app.models.shipment_data import SHIPMENTS
 from app.schemas.shipment_schema import ApiResponse, DashboardOverview, ExplainRequest, ExplainRiskResponse, ShipmentOut
 from app.services.ais_service import get_vessels_snapshot
+from app.services.global_risk_service import build_global_risk_intelligence
 from app.services.dri_service import calculate_dri
 from app.services.reroute_service import get_best_route
 from app.services.explain_service import explain_risk
@@ -29,6 +30,14 @@ def _build_shipments() -> List[ShipmentOut]:
         enriched: Dict[str, object] = {
             **raw,
             "dri": int(dri_data["dri"]),
+            "rule_dri": int(dri_data.get("rule_dri", dri_data["dri"])),
+            "ml_dri": int(dri_data.get("ml_dri", dri_data["dri"])),
+            "xgb_dri": int(dri_data.get("xgb_dri", dri_data.get("ml_dri", dri_data["dri"]))),
+            "lstm_dri": int(dri_data.get("lstm_dri", dri_data["dri"])),
+            "trend": str(dri_data.get("trend", "stable")),
+            "time_aware_prediction": bool(dri_data.get("time_aware_prediction", False)),
+            "confidence": float(dri_data.get("confidence", 0.0)),
+            "prediction_engine": dri_data.get("prediction_engine", "Rule-based fallback"),
             "factors": dri_data["factors"],
             "weather_risk": int(weather["risk"]),
             "weather": weather,
@@ -96,6 +105,11 @@ def get_weather_zones_endpoint() -> ApiResponse:
     return ApiResponse(data=get_weather_zones())
 
 
+@router.get("/global-risk", response_model=ApiResponse)
+def global_risk_endpoint(window: str = "24h") -> ApiResponse:
+    return ApiResponse(data=build_global_risk_intelligence(window=window))
+
+
 @router.get("/dashboard/overview", response_model=ApiResponse)
 def dashboard_overview() -> ApiResponse:
     shipments = _build_shipments()
@@ -149,13 +163,54 @@ def dashboard_overview() -> ApiResponse:
     return ApiResponse(data=overview.model_dump())
 
 
+@router.get("/dri/test", response_model=ApiResponse)
+def dri_test_endpoint() -> ApiResponse:
+    sample = {
+        "weather_severity": 65,
+        "congestion_score": 70,
+        "vessel_density": 55,
+        "route_length": 5000,
+        "visibility": 7,
+    }
+
+    from app.services.ml_service import predict_dri
+
+    try:
+        return ApiResponse(data=predict_dri(sample))
+    except Exception:
+        return ApiResponse(data={"predicted_dri": 0, "confidence": 0.0, "engine": "unavailable"})
+
+
+@router.get("/dri/test/lstm", response_model=ApiResponse)
+def dri_lstm_test_endpoint() -> ApiResponse:
+    sample_sequence = [
+        [52, 58, 44, 9],
+        [55, 59, 45, 9],
+        [58, 61, 46, 8.8],
+        [60, 62, 48, 8.7],
+        [62, 64, 49, 8.5],
+        [63, 66, 51, 8.4],
+        [65, 67, 52, 8.2],
+        [66, 68, 54, 8.1],
+        [68, 70, 55, 7.9],
+        [69, 72, 57, 7.8],
+    ]
+
+    from app.services.lstm_service import predict_dri as predict_lstm_dri
+
+    try:
+        return ApiResponse(data=predict_lstm_dri(sample_sequence))
+    except Exception:
+        return ApiResponse(data={"lstm_dri": 0, "trend": "stable", "engine": "unavailable"})
+
+
 @router.post("/explain-risk", response_model=ApiResponse)
 def explain_risk_endpoint(payload: ExplainRequest) -> ApiResponse:
-    analysis = explain_risk(payload.shipment)
+    analysis = explain_risk(payload.model_dump())
     return ApiResponse(data=ExplainRiskResponse(**analysis).model_dump())
 
 
 @router.post("/explain", response_model=ApiResponse)
 def explain(payload: ExplainRequest) -> ApiResponse:
-    analysis = explain_risk(payload.shipment)
+    analysis = explain_risk(payload.model_dump())
     return ApiResponse(data=ExplainRiskResponse(**analysis).model_dump())

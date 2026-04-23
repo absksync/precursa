@@ -17,10 +17,13 @@ class Settings(BaseSettings):
     AIS_API_KEY: str = ""
     WEATHER_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
+    NEWS_API_KEY: str = ""
 
     OPEN_METEO_BASE_URL: str = "https://api.open-meteo.com/v1"
     GEMINI_MODEL: str = "gemini-2.5-flash"
     AIS_STREAM_URL: str = "wss://stream.aisstream.io/v0/stream"
+    NEWS_API_BASE_URL: str = "https://newsapi.org/v2"
+    GDELT_BASE_URL: str = "https://api.gdeltproject.org/api/v2/doc/doc"
 
     AIS_MAX_VESSELS: int = 120
     AIS_MIN_LAT: float = Field(default=1.0)

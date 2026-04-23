@@ -26,6 +26,11 @@ export async function fetchDashboardOverview() {
   return unwrap(response)
 }
 
+export async function fetchGlobalRiskIntelligence(window = '24h') {
+  const response = await client.get('/global-risk', { params: { window } })
+  return unwrap(response)
+}
+
 export async function fetchSystemHealth() {
   const response = await client.get('/health/system')
   return unwrap(response)
@@ -42,7 +47,7 @@ export async function fetchWeatherZones() {
 }
 
 export async function explainShipmentRisk(shipment) {
-  const response = await client.post('/explain-risk', { shipment })
+  const response = await client.post('/explain-risk', shipment)
   return unwrap(response)
 }
 

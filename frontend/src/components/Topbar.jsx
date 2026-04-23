@@ -1,7 +1,51 @@
 import { motion } from 'framer-motion'
-import { FiBell, FiMenu, FiMoon, FiSearch, FiSun } from 'react-icons/fi'
+import { useEffect } from 'react'
+import { FiBell, FiMic, FiMicOff, FiMenu, FiMoon, FiSearch, FiSun } from 'react-icons/fi'
 
-export default function Topbar({ title, subtitle, theme, onToggleTheme, onSearch, searchValue, onSearchValueChange, onMenuClick }) {
+import useSpeechRecognition from '../hooks/useSpeechRecognition'
+
+export default function Topbar({ title, subtitle, theme, onToggleTheme, onSearch, searchValue, onSearchValueChange, onMenuClick, onVoiceSubmit }) {
+  const {
+    isSupported,
+    isListening,
+    transcript,
+    error,
+    startListening,
+    stopListening,
+    clearTranscript,
+    clearError,
+  } = useSpeechRecognition({
+    timeoutMs: 8000,
+    onFinalTranscript: (finalText) => {
+      const text = String(finalText || '').trim()
+      if (!text) return
+      onSearchValueChange(text)
+      onVoiceSubmit?.(text)
+    }
+  })
+
+  useEffect(() => {
+    if (isListening) {
+      onSearchValueChange(transcript)
+    }
+  }, [isListening, onSearchValueChange, transcript])
+
+  const handleMicClick = () => {
+    if (!isSupported) {
+      clearTranscript()
+      return
+    }
+
+    if (isListening) {
+      stopListening()
+      return
+    }
+
+    clearError()
+    clearTranscript()
+    startListening()
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: -8 }}
@@ -28,24 +72,37 @@ export default function Topbar({ title, subtitle, theme, onToggleTheme, onSearch
         <button
           type="button"
           onClick={onToggleTheme}
-          className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs uppercase tracking-[0.18em] text-gray-300 transition hover:bg-white/10 hover:text-white"
+          className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-gray-300 transition hover:bg-white/10 hover:text-white"
           aria-label="Toggle color theme"
         >
           {theme === 'dark' ? <FiSun size={14} /> : <FiMoon size={14} />}
-          {theme === 'dark' ? 'Light mode' : 'Dark mode'}
         </button>
 
-        <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
-          <FiSearch size={14} className="text-gray-500" />
+        <div className="relative min-w-[19rem] max-w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] transition focus-within:border-cyan-400/30 focus-within:bg-white/5 md:min-w-[22rem]">
+          <FiSearch size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
           <input
             value={searchValue}
             onChange={(e) => onSearchValueChange(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') onSearch(e.currentTarget.value)
             }}
-            placeholder="Search shipments"
-            className="w-36 bg-transparent text-xs text-white placeholder:text-gray-500 outline-none md:w-48"
+            placeholder="Speak or search shipments..."
+            className="w-full bg-transparent pl-7 pr-14 text-xs text-white placeholder:text-gray-500 outline-none"
           />
+          <button
+            type="button"
+            onClick={handleMicClick}
+            className={`absolute right-2 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-xl border transition ${isListening ? 'border-cyan-400/40 bg-cyan-400/15 text-cyan-100 shadow-[0_0_18px_rgba(34,211,238,0.28)] animate-pulse' : 'border-white/10 bg-white/5 text-gray-300 hover:border-white/20 hover:bg-white/10 hover:text-white'}`}
+            aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
+            title={isListening ? 'Listening…' : isSupported ? 'Use voice input' : 'Voice input not supported'}
+          >
+            {isListening ? <FiMicOff size={14} /> : <FiMic size={14} />}
+          </button>
+          {isListening && (
+            <span className="absolute -bottom-5 right-2 text-[10px] uppercase tracking-[0.24em] text-cyan-200">
+              Listening...
+            </span>
+          )}
         </div>
 
         <button
@@ -66,6 +123,12 @@ export default function Topbar({ title, subtitle, theme, onToggleTheme, onSearch
             <span className="block text-[11px] text-gray-500">Admin</span>
           </span>
         </button>
+
+        {error && (
+          <div className="w-full text-right text-[11px] text-orange-200 md:-mt-2 md:pr-1">
+            {error}
+          </div>
+        )}
       </div>
     </motion.div>
   )

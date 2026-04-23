@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
 from app.core.config import settings
-from app.core.startup import start_ais_stream
+from app.core.startup import preload_ml_model, start_ais_stream
 
 
 logging.basicConfig(
@@ -39,4 +39,5 @@ def root() -> dict:
 
 @app.on_event("startup")
 async def startup_event() -> None:
+    preload_ml_model()
     await start_ais_stream()

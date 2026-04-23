@@ -164,6 +164,55 @@ def _weather_details(weather: Dict[str, object]) -> Dict[str, str]:
     }
 
 
+def _build_gemini_context(
+    shipment: Dict[str, object],
+    weather: Dict[str, object],
+    route_points: List[List[float]],
+    nearby_vessels: List[Dict[str, object]],
+    route_zones: List[str],
+    breakdown: Dict[str, int],
+    dri: int,
+    level: str,
+    delay_estimate: str,
+) -> Dict[str, object]:
+    zone_name = route_zones[0] if route_zones else "No impacted zone detected"
+    return {
+        "shipment_id": shipment.get("id", "Unknown"),
+        "route": f"{shipment.get('origin', 'N/A')} → {shipment.get('destination', 'N/A')}",
+        "origin": shipment.get("origin", "N/A"),
+        "destination": shipment.get("destination", "N/A"),
+        "cargo": shipment.get("cargo", "general"),
+        "dri": dri,
+        "level": level,
+        "delay_estimate": delay_estimate,
+        "congestion": breakdown.get("congestion", 0),
+        "weather": {
+            "temperature": _safe_float(weather.get("temperature"), 0.0),
+            "zone_name": weather.get("zone_name") or get_primary_zone().get("name"),
+            "wind_speed": _safe_float(weather.get("wind_speed") or weather.get("wind_kph"), 0.0),
+            "rain": _safe_float(weather.get("rain"), 0.0),
+            "visibility": _safe_float(weather.get("visibility"), 0.0),
+            "condition": weather.get("condition") or weather.get("weathercode") or "unknown",
+            "weather_severity": _safe_int(weather.get("weather_severity") or weather.get("risk"), 0),
+        },
+        "breakdown": breakdown,
+        "nearby_vessels": [
+            {
+                "mmsi": vessel.get("mmsi"),
+                "sog": _safe_float(vessel.get("sog"), 0.0),
+                "distance_km": round(_safe_float(vessel.get("distance_km"), 0.0), 1),
+            }
+            for vessel in nearby_vessels[:10]
+        ],
+        "route_zones": route_zones,
+        "route_context": {
+            "route_points": route_points,
+            "route_span_points": len(route_points),
+            "zone_focus": zone_name,
+        },
+    }
+
+
 def _zone_label(zone: Dict[str, object], weather: Dict[str, object], nearby_vessels: int, congestion_impact: int) -> str:
     weather_severity = _safe_float(zone.get("severity"), 0.0)
     rain = _safe_float(weather.get("rain"), 0.0)
@@ -209,25 +258,47 @@ def _zone_candidates(shipment: Dict[str, object], route_points: List[List[float]
 
 
 def explain_risk(shipment: Dict[str, object]) -> Dict[str, object]:
+    raw_weather = shipment.get("weather") if isinstance(shipment.get("weather"), dict) else {}
+    provided_congestion = _safe_int(shipment.get("congestion"), 0)
     route_points = _route_points(shipment)
     vessels = get_vessels_snapshot(limit=80)
-    weather = get_weather(
-        _safe_float(shipment.get("lat"), default=get_primary_zone()["lat"]),
-        _safe_float(shipment.get("lon"), default=get_primary_zone()["lon"]),
-    )
+
+    if raw_weather:
+        weather = {
+            "temperature": _safe_float(raw_weather.get("temperature"), 0.0),
+            "wind_speed": _safe_float(raw_weather.get("wind_speed"), 0.0),
+            "wind_kph": _safe_float(raw_weather.get("wind_speed"), 0.0),
+            "rain": _safe_float(raw_weather.get("rain"), 0.0),
+            "visibility": _safe_float(raw_weather.get("visibility"), 0.0),
+            "weather_severity": _safe_int(raw_weather.get("severity"), 0),
+            "zone_name": shipment.get("route") or f"{shipment.get('origin', 'N/A')} → {shipment.get('destination', 'N/A')}",
+            "condition": raw_weather.get("condition") or "reported",
+            "risk": _safe_int(raw_weather.get("severity"), 0),
+        }
+    else:
+        weather = get_weather(
+            _safe_float(shipment.get("lat"), default=get_primary_zone()["lat"]),
+            _safe_float(shipment.get("lon"), default=get_primary_zone()["lon"]),
+        )
 
     nearby_vessels = _nearby_vessels(route_points, vessels)
     weather_impact = _weather_impact(weather)
-    congestion_impact = _congestion_impact(route_points, vessels, nearby_vessels)
+    computed_congestion = _congestion_impact(route_points, vessels, nearby_vessels)
+    congestion_impact = provided_congestion if provided_congestion > 0 else computed_congestion
     density_impact = _route_density(route_points, nearby_vessels)
     carrier_impact = _carrier_impact(shipment)
+    reported_weather_severity = _safe_int(raw_weather.get("severity"), 0) if raw_weather else _safe_int(weather.get("weather_severity") or weather.get("risk"), 0)
 
-    dri = _safe_int(shipment.get("dri"), default=_clamp(weather_impact * 0.25 + congestion_impact * 0.35 + density_impact * 0.2 + carrier_impact * 0.2))
+    dri = _safe_int(
+        shipment.get("dri"),
+        default=_clamp(weather_impact * 0.25 + congestion_impact * 0.35 + density_impact * 0.2 + carrier_impact * 0.2),
+    )
     level = _level_from_dri(dri)
 
     delay_hours = (weather_impact * 0.4 + congestion_impact * 0.4 + density_impact * 0.2) * 0.5
     delay_low = max(1, int(round(delay_hours * 0.8)))
     delay_high = max(delay_low + 1, int(round(delay_hours * 1.2)))
+    delay_estimate = f"{delay_low}–{delay_high} hours"
 
     route_zones = _zone_candidates(shipment, route_points, nearby_vessels, congestion_impact)
 
@@ -238,30 +309,34 @@ def explain_risk(shipment: Dict[str, object]) -> Dict[str, object]:
         "carrier": carrier_impact,
     }
 
-    gemini_insight = generate_risk_insight({
-        "shipment": shipment,
-        "weather": weather,
-        "breakdown": breakdown,
-        "nearby_vessels": nearby_vessels[:10],
-        "route_zones": route_zones,
-        "dri": dri,
-        "level": level,
-    })
+    gemini_context = _build_gemini_context(
+        shipment=shipment,
+        weather=weather,
+        route_points=route_points,
+        nearby_vessels=nearby_vessels,
+        route_zones=route_zones,
+        breakdown=breakdown,
+        dri=dri,
+        level=level,
+        delay_estimate=delay_estimate,
+    )
+
+    gemini_insight = generate_risk_insight({"context": gemini_context})
 
     dominant = sorted(breakdown.items(), key=lambda item: item[1], reverse=True)
     top_factor = dominant[0][0]
     zones_text = route_zones[0] if route_zones else "route exposure"
-    if top_factor == "weather":
-        insight = f"High risk is driven by severe weather conditions and overlapping weather bands near {zones_text.split(' - ')[0]}."
-    elif top_factor == "congestion":
-        insight = f"High risk is driven by AIS congestion with {len(nearby_vessels)} nearby vessels crowding the route corridor."
-    elif top_factor == "density":
-        insight = f"High risk is driven by vessel clustering along a dense route corridor, especially near {zones_text.split(' - ')[0]}."
-    else:
-        insight = f"High risk remains elevated because carrier pressure combines with weather and AIS congestion across the route."
+    route_name = f"{shipment.get('origin', 'N/A')} → {shipment.get('destination', 'N/A')}"
 
-    if gemini_insight:
-        insight = gemini_insight
+    if reported_weather_severity > 70:
+        insight = "High disruption risk due to severe weather conditions along the route."
+    elif congestion_impact > 60:
+        insight = "Elevated risk caused by heavy port congestion affecting turnaround times."
+    else:
+        insight = "Moderate risk driven by combined operational and environmental factors."
+
+    if gemini_insight and len(gemini_insight.strip()) >= 80:
+        insight = gemini_insight.strip()
 
     return {
         "shipment_id": shipment.get("id", "Unknown"),
@@ -269,9 +344,17 @@ def explain_risk(shipment: Dict[str, object]) -> Dict[str, object]:
         "destination": shipment.get("destination", "N/A"),
         "route": f"{shipment.get('origin', 'N/A')} → {shipment.get('destination', 'N/A')}",
         "dri": dri,
+        "rule_dri": _safe_int(shipment.get("rule_dri"), dri),
+        "ml_dri": _safe_int(shipment.get("ml_dri"), dri),
+        "xgb_dri": _safe_int(shipment.get("xgb_dri"), _safe_int(shipment.get("ml_dri"), dri)),
+        "lstm_dri": _safe_int(shipment.get("lstm_dri"), dri),
+        "trend": str(shipment.get("trend", "stable")),
+        "time_aware_prediction": bool(shipment.get("time_aware_prediction", False)),
+        "confidence": float(shipment.get("confidence", 0.0) or 0.0),
+        "prediction_engine": str(shipment.get("prediction_engine", "Rule-based fallback")),
         "level": level,
         "breakdown": breakdown,
-        "delay_estimate": f"{delay_low}–{delay_high} hours",
+        "delay_estimate": delay_estimate,
         "zones": route_zones,
         "weather_details": _weather_details(weather),
         "insight": insight,

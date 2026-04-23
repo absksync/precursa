@@ -22,6 +22,9 @@ function SectionTitle({ title, subtitle }) {
 export default function RiskIntelligenceModal({ open, loading, analysis, error, onClose }) {
   const breakdown = analysis?.breakdown || {}
   const zones = analysis?.zones || []
+  const confidence = Math.round((Number(analysis?.confidence || 0) || 0) * 100)
+  const trend = String(analysis?.trend || 'stable')
+  const trendLabel = trend === 'increasing' ? 'Increasing risk' : trend === 'decreasing' ? 'Decreasing risk' : 'Stable risk'
 
   return (
     <AnimatePresence>
@@ -79,6 +82,30 @@ export default function RiskIntelligenceModal({ open, loading, analysis, error, 
                         <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                           <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Vessels Nearby</p>
                           <p className="mt-2 text-4xl font-semibold text-white">{analysis.vessels_nearby}</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">AI Model Confidence</p>
+                          <p className="mt-2 text-3xl font-semibold text-white">{confidence}%</p>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Prediction Engine</p>
+                          <p className="mt-2 text-lg font-semibold text-white">{analysis.prediction_engine || 'Rule-based fallback'}</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Trend</p>
+                          <p className="mt-2 text-xl font-semibold text-white">{trendLabel}</p>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Time-aware prediction</p>
+                          <p className="mt-2 text-lg font-semibold text-white">
+                            {analysis.time_aware_prediction ? 'Enabled' : 'Unavailable'}
+                          </p>
                         </div>
                       </div>
                     </Card>

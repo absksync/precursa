@@ -13,6 +13,7 @@ export default function Layout({
   searchValue,
   onSearch,
   onSearchValueChange,
+  onVoiceSubmit,
   onToggleTheme,
   onNavigate,
   children
@@ -46,6 +47,7 @@ export default function Layout({
           searchValue={searchValue}
           onSearch={onSearch}
           onSearchValueChange={onSearchValueChange}
+          onVoiceSubmit={onVoiceSubmit}
           onToggleTheme={onToggleTheme}
           onMenuClick={() => setSidebarOpen(true)}
         />

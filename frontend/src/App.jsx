@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { SignedIn, SignedOut } from '@clerk/clerk-react'
 import { FiAlertTriangle, FiBox, FiNavigation, FiTrendingUp } from 'react-icons/fi'
+import { Navigate, Route, Routes } from 'react-router-dom'
 
 import Card from './components/Card'
 import Layout from './components/Layout'
@@ -10,10 +12,14 @@ import RiskIntelligenceModal from './components/RiskIntelligenceModal'
 import ShipmentsTable from './components/ShipmentsTable'
 import WeatherPanel from './components/WeatherPanel'
 import useLiveWeather from './hooks/useLiveWeather'
+import Reports from './pages/Reports'
+import GlobalRiskIntelligence from './pages/GlobalRiskIntelligence'
 import Settings from './pages/Settings'
 import WeatherIntelligence from './pages/WeatherIntelligence'
 import Analytics from './pages/Analytics'
+import Login from './pages/Login'
 import { explainShipmentRisk, fetchDashboardOverview, fetchShipments, fetchVessels } from './services/api'
+import Signup from './pages/Signup'
 import { riskColor, riskLevelFromDRI } from './utils/risk'
 import './App.css'
 
@@ -34,6 +40,7 @@ function titleFromPage(page) {
     'risk-alerts': 'Risk Alerts',
     weather: 'Weather Intelligence',
     analytics: 'Analytics',
+    'global-risk': 'Global Risk Intelligence',
     reports: 'Reports',
     settings: 'Settings'
   }
@@ -49,13 +56,14 @@ function subtitleFromPage(page) {
     'risk-alerts': 'Monitoring',
     weather: 'Conditions',
     analytics: 'Insights',
+    'global-risk': 'Monitoring',
     reports: 'Exports',
     settings: 'Configuration'
   }
   return map[page] || 'Live Operations'
 }
 
-export default function App() {
+function DashboardShell() {
   const [theme, setTheme] = useState(() => {
     if (typeof window === 'undefined') return 'dark'
     return window.localStorage.getItem('precursa-theme') || 'dark'
@@ -138,9 +146,48 @@ export default function App() {
     setAnalysisError('')
     setAnalysis(null)
 
+    const explainPayload = {
+      id: shipment.id,
+      origin: shipment.origin,
+      destination: shipment.destination,
+      route: `${shipment.origin} → ${shipment.destination}`,
+      dri: Number(shipment.dri || 0),
+      weather: {
+        temperature: Number(shipment.weather?.temperature ?? shipment.weather?.temp_c ?? 0),
+        wind_speed: Number(shipment.weather?.wind_speed ?? shipment.weather?.wind_kph ?? 0),
+        rain: Number(shipment.weather?.rain ?? 0),
+        visibility: Number(shipment.weather?.visibility ?? 0),
+        severity: Number(shipment.weather?.weather_severity ?? shipment.weather?.risk ?? 0),
+      },
+      congestion: Number(
+        (shipment.factors || []).find((factor) => String(factor.name || '').toLowerCase().includes('congestion'))?.value
+        ?? (shipment.factors || []).find((factor) => String(factor.name || '').toLowerCase().includes('port'))?.value
+        ?? 0
+      ),
+      risk_level: riskLevelFromDRI(Number(shipment.dri || 0)),
+      lat: shipment.lat,
+      lon: shipment.lon,
+      route_coords: shipment.route_coords,
+      cargo: shipment.cargo,
+      factors: shipment.factors,
+      rule_dri: shipment.rule_dri,
+      ml_dri: shipment.ml_dri,
+      xgb_dri: shipment.xgb_dri,
+      lstm_dri: shipment.lstm_dri,
+      trend: shipment.trend,
+      time_aware_prediction: shipment.time_aware_prediction,
+      confidence: shipment.confidence,
+      prediction_engine: shipment.prediction_engine,
+    }
+
     try {
-      const response = await explainShipmentRisk(shipment)
+      const response = await explainShipmentRisk(explainPayload)
       setAnalysis(response)
+      setShipments((current) => current.map((item) => (
+        item.id === shipmentId
+          ? { ...item, explanation: response?.insight || '', explanationAnalysis: response }
+          : item
+      )))
     } catch (err) {
       const msg = err?.response?.data?.detail || 'Failed to fetch risk analysis.'
       setAnalysisError(msg)
@@ -149,6 +196,30 @@ export default function App() {
       setAnalysisLoading(false)
     }
   }, [])
+
+  const handleVoiceSearch = useCallback(async (queryText) => {
+    const transcript = String(queryText || '').trim()
+    if (!transcript) return
+
+    handleSearch(transcript)
+
+    const explainIntent = /\b(explain|why|analyse|analyze|tell me about)\b/i.test(transcript)
+    if (!explainIntent) return
+
+    const terms = transcript.toLowerCase().split(/[^a-z0-9]+/).filter((part) => part.length > 2)
+    const rankedShipments = [...shipments]
+      .map((shipment) => {
+        const haystack = [shipment.id, shipment.origin, shipment.destination, shipment.cargo].filter(Boolean).join(' ').toLowerCase()
+        const score = terms.reduce((total, term) => total + (haystack.includes(term) ? 1 : 0), 0)
+        return { shipment, score }
+      })
+      .sort((left, right) => right.score - left.score)
+
+    const bestMatch = rankedShipments[0]
+    if (bestMatch?.shipment && bestMatch.score > 0) {
+      await handleExplain(bestMatch.shipment)
+    }
+  }, [handleExplain, handleSearch, shipments])
 
   const metrics = useMemo(() => {
     const totalShipments = overview?.total_shipments ?? shipments.length
@@ -248,6 +319,11 @@ export default function App() {
     return `${head} in ${location} may delay shipments in the next 4–6 hours.`
   }, [currentWeather, weatherZones])
 
+  const insightRefreshLabel = useMemo(() => {
+    if (!lastUpdated || lastUpdated === '--') return 'Awaiting first live refresh'
+    return `Live refresh at ${lastUpdated}`
+  }, [lastUpdated])
+
   return (
     <>
       <Layout
@@ -260,6 +336,7 @@ export default function App() {
         searchValue={shipmentQuery}
         onSearch={handleSearch}
         onSearchValueChange={setShipmentQuery}
+        onVoiceSubmit={handleVoiceSearch}
         onToggleTheme={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
         onNavigate={navigateTo}
       >
@@ -331,7 +408,7 @@ export default function App() {
                 <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-3">
                   <div>
                     <p className="text-sm font-medium text-white">Operational Insight</p>
-                    <p className="text-xs text-slate-400">Auto-generated from live weather and AIS conditions</p>
+                    <p className="text-xs text-slate-400">Auto-generated from live weather and AIS conditions · {insightRefreshLabel}</p>
                   </div>
                 </div>
 
@@ -415,11 +492,18 @@ export default function App() {
           />
         )}
 
+        {activePage === 'global-risk' && <GlobalRiskIntelligence />}
+
         {activePage === 'reports' && (
-          <div className="glass-card p-5 text-sm text-gray-300">
-            <p className="text-white">Reports Module</p>
-            <p className="mt-2">Report workflows are available from this section. Use shipments/risk pages to select data scope first.</p>
-          </div>
+          <Reports
+            shipments={shipments}
+            vessels={vessels}
+            overview={overview}
+            currentWeather={currentWeather}
+            weatherZones={weatherZones}
+            loading={loading || weatherLoading}
+            lastUpdated={lastUpdated}
+          />
         )}
 
         {activePage === 'settings' && <Settings theme={theme} />}
@@ -446,5 +530,53 @@ export default function App() {
         }}
       />
     </>
+  )
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route
+        path="/sign-in/*"
+        element={(
+          <>
+            <SignedIn>
+              <Navigate to="/" replace />
+            </SignedIn>
+            <SignedOut>
+              <Login />
+            </SignedOut>
+          </>
+        )}
+      />
+
+      <Route
+        path="/sign-up/*"
+        element={(
+          <>
+            <SignedIn>
+              <Navigate to="/" replace />
+            </SignedIn>
+            <SignedOut>
+              <Signup />
+            </SignedOut>
+          </>
+        )}
+      />
+
+      <Route
+        path="*"
+        element={(
+          <>
+            <SignedIn>
+              <DashboardShell />
+            </SignedIn>
+            <SignedOut>
+              <Navigate to="/sign-in" replace />
+            </SignedOut>
+          </>
+        )}
+      />
+    </Routes>
   )
 }
