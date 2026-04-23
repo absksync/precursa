@@ -1,14 +1,14 @@
-# Python
+# env files
+.env
+frontend/.env
+backend/.env
+
+# node
+node_modules/
+
+# python
 venv/
 __pycache__/
-*.pyc
 
-# Env
-.env
-
-# Node
-node_modules/
-dist/
-
-# Mac
+# misc
 .DS_Store
